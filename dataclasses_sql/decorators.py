@@ -1,19 +1,69 @@
+from collections import OrderedDict
+
 from .sqlite_memory import sqlite_memory_init
 from .insert import insert
 from .select import SelectStatementBuilder
+from .update import update
+
 
 # Connect to database. TODO: make this configurable
 engine, metadata = sqlite_memory_init()
 
 
+class SQLModel(OrderedDict):
+    """Like an OrderedDict, but treats id as a special key for
+       equality purposes and hashable (so you can create sets).
+    """
+
+    IDKEY = "id"
+
+    def __post_init__(self):
+        OrderedDict.__init__(self, {})
+        self._fetching = False
+        self._dirty = False
+
+    def __lt__(self, other):
+        return self[SQLModel.IDKEY] < other[SQLModel.IDKEY]
+
+    def __eq__(self, other):
+        if SQLModel.IDKEY in self:
+            return self[SQLModel.IDKEY] == other[SQLModel.IDKEY]
+        else:
+            return dict.__eq__(self, other)
+
+    def __repr__(self):
+        return dict.__repr__(self)
+
+    def __hash__(self) -> int:
+        if SQLModel.IDKEY in self:
+            return hash(self[SQLModel.IDKEY])
+        else:
+            return 0
+
+    def __setitem__(self, name, value):
+        super().__setitem__(name, value)
+
+    def __setattr__(self, name, value):
+        if name == "_dirty":
+            super().__setattr__(name, value)
+            return
+        if hasattr(self, "_fetching") and not self._fetching:
+            self._dirty = True
+            super().clear()
+        super().__setattr__(name, value)
+        self.__setitem__(name, value)
+
+
 # Decorators
 def sql(cls):
     def post_init(self):
-        # Do any initializations here
-        pass
+        # TODO: Debug why this is not called on construction
+        SQLModel.__post_init__(self)
+        # Do any other initializations here
 
     def save(self):
-        insert(metadata, self, check_exists=True)
+        if not insert(metadata, self, check_exists=True):
+            update(metadata, self)
 
     @classmethod
     def get(cls, idvalue):
@@ -25,11 +75,13 @@ def sql(cls):
         with metadata.bind.begin() as conn:
             row = conn.execute(statement).fetchone()
         kwargs = {k: v for k, v in row.items() if k != "id"}
-        instance = cls(**kwargs)  # TODO: Figure out how to construct a cls from row
+        # TODO: Figure out how to construct a cls from row
+        instance = cls(**kwargs)
         instance._rowid = row["id"]
+        instance._fetching = False
         return instance
 
     extra = {"__post_init__": post_init, "save": save}
-    cls = type(cls.__name__, (), {**cls.__dict__, **extra})
-    cls.get = get
-    return cls
+    newcls = type(cls.__name__, (SQLModel,), {**cls.__dict__, **extra})
+    newcls.get = get
+    return newcls
