@@ -66,12 +66,7 @@ def sql(cls):
             update(metadata, self)
 
     @classmethod
-    def get(cls, idvalue):
-        builder = SelectStatementBuilder()
-        builder.add_all_columns(cls)
-        builder.add_clause(cls, "id", idvalue)
-        statement = builder.build()
-
+    def statement(cls, statement):
         with metadata.bind.begin() as conn:
             row = conn.execute(statement).fetchone()
         kwargs = {k: v for k, v in row.items() if k != "id"}
@@ -81,7 +76,17 @@ def sql(cls):
         instance._fetching = False
         return instance
 
+    @classmethod
+    def get(cls, idvalue):
+        builder = SelectStatementBuilder()
+        builder.add_all_columns(cls)
+        builder.add_clause(cls, "id", idvalue)
+        stmt = builder.build()
+
+        return cls.statement(stmt)
+
     extra = {"__post_init__": post_init, "save": save}
     newcls = type(cls.__name__, (SQLModel,), {**cls.__dict__, **extra})
     newcls.get = get
+    newcls.statement = statement
     return newcls
