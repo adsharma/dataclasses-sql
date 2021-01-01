@@ -1,7 +1,9 @@
+import os
 import unittest
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
+os.environ["SQLA_ENGINE"] = "sqlite://"  # Use in-memory
 from dataclasses_sql.decorators import sql
 
 
