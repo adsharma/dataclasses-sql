@@ -1,13 +1,16 @@
+import os
+
 from collections import OrderedDict
 
 from .sqlite_memory import sqlite_memory_init
+from .sqlite_engine import sqlite_engine_init
 from .insert import insert
 from .select import SelectStatementBuilder
 from .update import update
 
 
 # Connect to database. TODO: make this configurable
-engine, metadata = sqlite_memory_init()
+engine, metadata = sqlite_engine_init(os.getenv("SQLA_ENGINE"))
 
 
 class SQLModel(OrderedDict):
@@ -68,13 +71,17 @@ def sql(cls):
     @classmethod
     def statement(cls, statement):
         with metadata.bind.begin() as conn:
-            row = conn.execute(statement).fetchone()
-        kwargs = {k: v for k, v in row.items() if k != "id"}
-        # TODO: Figure out how to construct a cls from row
-        instance = cls(**kwargs)
-        instance._rowid = row["id"]
-        instance._fetching = False
-        return instance
+            rows = conn.execute(statement).fetchall()
+        instances = []
+        for row in rows:
+            kwargs = {k: v for k, v in row.items() if k != "id"}
+            # TODO: Figure out how to construct a cls from row
+            instance = cls(**kwargs)
+            if "id" in row:
+                instance._rowid = row["id"]
+            instance._fetching = False
+            instances.append(instance)
+        return instances
 
     @classmethod
     def get(cls, idvalue):
@@ -83,7 +90,7 @@ def sql(cls):
         builder.add_clause(cls, "id", idvalue)
         stmt = builder.build()
 
-        return cls.statement(stmt)
+        return cls.statement(stmt)[0]
 
     extra = {"__post_init__": post_init, "save": save}
     newcls = type(cls.__name__, (SQLModel,), {**cls.__dict__, **extra})
